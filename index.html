@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Pocket">
+  <meta name="description" content="Live tempo for drummers. Set a target, play, see if you're rushing or dragging.">
+  <title>Pocket</title>
+  <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="preload" href="fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="app" class="state-idle">
+    <!-- top bar -->
+    <header class="topbar">
+      <button id="settingsBtn" class="icon-btn" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="17" r="2" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+      <div class="brand">POCKET</div>
+      <div class="top-right">
+        <button id="chairBtn" class="icon-btn chair-btn" aria-label="Chair mode" aria-pressed="false">
+          <svg viewBox="0 0 12 16" width="18" height="24" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M1 0h1v9H1zM10 0h1v9h-1zM1 1h10v3H1zM0 8h12v2H0zM0 10h2v6H0zM10 10h2v6h-2zM3 10h1v3H3zM8 10h1v3H8z"/></svg>
+        </button>
+        <button id="stopBtn" class="stop-btn">STOP</button>
+      </div>
+    </header>
+
+    <!-- target: swipe, tap in time, or −/＋ -->
+    <section id="targetBlock" class="target swipeable">
+      <div class="label">TARGET<button id="lockBadge" class="lock-badge" aria-label="Target locked: tap to unlock">🔒 LOCKED</button></div>
+      <div class="target-row">
+        <button id="minusBtn" class="step-btn" aria-label="Target down 1 BPM">−</button>
+        <span id="targetBpm" class="target-bpm">120</span>
+        <button id="plusBtn" class="step-btn" aria-label="Target up 1 BPM">＋</button>
+      </div>
+    </section>
+
+    <!-- live: meter, chair line, number, status (same rows in both modes) -->
+    <section id="liveBlock" class="live-block swipeable">
+      <div class="meter">
+        <div class="meter-track">
+          <div id="zone" class="meter-zone"></div>
+          <div class="meter-center"></div>
+          <div id="marker" class="meter-marker"></div>
+        </div>
+        <div class="meter-labels">
+          <span>◀ DRAG</span>
+          <span id="devText">±0</span>
+          <span>RUSH ▶</span>
+        </div>
+      </div>
+
+      <div id="chairLine" class="chair-line" aria-hidden="true"></div>
+
+      <div class="live">
+        <div class="live-wrap">
+          <div id="liveBpm" class="live-bpm">---</div>
+          <div id="pulse" class="pulse" aria-hidden="true"></div>
+        </div>
+        <div class="live-label">BPM<span id="feel" class="feel" hidden></span></div>
+        <div id="status" class="status" role="status" aria-live="polite">LISTENING</div>
+        <div id="tip" class="tip">start playing</div>
+      </div>
+
+      <div id="swipeOverlay" class="swipe-overlay" aria-hidden="true">
+        <div class="label">TARGET</div>
+        <div id="overlayBpm" class="overlay-bpm">120</div>
+      </div>
+    </section>
+
+    <!-- favourites -->
+    <footer class="controls">
+      <div class="favs-row">
+        <div id="favs" class="favs" aria-label="Favourite tempos"></div>
+        <button id="addFav" class="chip chip-add" aria-label="Save target as a favourite">＋</button>
+      </div>
+    </footer>
+
+    <div id="toast" class="toast" role="alert"></div>
+
+    <!-- start -->
+    <div id="startScreen" class="overlay start">
+      <div class="start-inner">
+        <div class="start-brand">POCKET</div>
+        <p class="start-sub">live tempo for drummers</p>
+        <button id="startBtn" class="btn btn-start">START</button>
+        <p id="startErr" class="start-err" hidden></p>
+        <p class="start-tip">Put your phone 1–2 m from the kit.</p>
+      </div>
+    </div>
+
+    <!-- first-run tips -->
+    <div id="tips" class="overlay tips-overlay" hidden>
+      <div class="tips-card">
+        <div class="tips-demo" aria-hidden="true">
+          <span class="tips-num">120</span>
+          <span class="tips-finger"></span>
+        </div>
+        <ul class="tips-list">
+          <li><b>Swipe up / down</b> to set tempo</li>
+          <li><b>Tap the number</b> to tap tempo</li>
+          <li><b>− / ＋</b> for one BPM</li>
+        </ul>
+        <button id="tipsDone" class="btn btn-start">GOT IT</button>
+      </div>
+    </div>
+
+    <!-- session summary (after STOP) -->
+    <div id="summary" class="overlay sheet" hidden>
+      <div class="sheet-inner">
+        <div class="sheet-head"><span>SESSION</span></div>
+        <div class="sum-grid">
+          <div><div class="sum-num" id="sumAvg">—</div><div class="sum-lbl">AVG BPM</div></div>
+          <div><div class="sum-num" id="sumDev">—</div><div class="sum-lbl">VS TARGET</div></div>
+          <div><div class="sum-num" id="sumTime">—</div><div class="sum-lbl">PLAYED</div></div>
+        </div>
+        <div class="sum-bar" aria-hidden="true">
+          <div id="sumBarDrag" class="seg-drag"></div>
+          <div id="sumBarLock" class="seg-lock"></div>
+          <div id="sumBarRush" class="seg-rush"></div>
+        </div>
+        <div class="sum-legend">
+          <span class="c-drag">DRAGGING <b id="sumDrag">0%</b></span>
+          <span class="c-lock">LOCKED IN <b id="sumLock">0%</b></span>
+          <span class="c-rush">RUSHING <b id="sumRush">0%</b></span>
+        </div>
+        <div id="sumChairs" class="sum-grid sum-chairs" hidden>
+          <div><div class="sum-num" id="sumTaken">0</div><div class="sum-lbl">CHAIRS TAKEN</div></div>
+          <div><div class="sum-num" id="sumDodged">0</div><div class="sum-lbl">DODGED</div></div>
+          <div><div class="sum-num" id="sumStreak">0:00</div><div class="sum-lbl">BEST STREAK</div></div>
+        </div>
+        <p id="sumVerdict" class="sum-verdict"></p>
+        <button id="sumDone" class="btn btn-start">DONE</button>
+      </div>
+    </div>
+
+    <!-- settings -->
+    <div id="settings" class="overlay sheet" hidden>
+      <div class="sheet-inner">
+        <div class="sheet-head">
+          <span>SETTINGS</span>
+          <button id="closeSettings" class="icon-btn" aria-label="Close settings">✕</button>
+        </div>
+        <div class="setting">
+          <div class="setting-label">CHAIR MODE</div>
+          <div class="seg" data-setting="chair">
+            <button data-value="false">OFF</button>
+            <button data-value="true">ON</button>
+          </div>
+          <div class="seg seg-sub" data-setting="difficulty">
+            <button data-value="gentle">GENTLE</button>
+            <button data-value="strict">STRICT</button>
+            <button data-value="relentless">RELENTLESS</button>
+          </div>
+          <p class="setting-note">Drift way off and a chair comes flying. Lock back in to dodge it.</p>
+        </div>
+        <div class="setting">
+          <div class="setting-label">TARGET LOCK</div>
+          <div class="seg" data-setting="locked">
+            <button data-value="false">OFF</button>
+            <button data-value="true">ON</button>
+          </div>
+          <p class="setting-note">Stops stray swipes changing the target.</p>
+        </div>
+        <div class="setting">
+          <div class="setting-label">MIC SENSITIVITY</div>
+          <div class="seg" data-setting="sensitivity">
+            <button data-value="low">LOW<small>loud kit</small></button>
+            <button data-value="medium">MED</button>
+            <button data-value="high">HIGH<small>practice pad</small></button>
+          </div>
+          <div class="level"><div id="levelBar" class="level-bar"></div></div>
+          <p class="setting-note">The bar should jump on every hit.</p>
+        </div>
+        <div class="setting">
+          <div class="setting-label">LOCKED-IN ZONE</div>
+          <div class="seg" data-setting="tolerance">
+            <button data-value="1">±1</button>
+            <button data-value="2">±2</button>
+            <button data-value="3">±3</button>
+            <button data-value="5">±5</button>
+          </div>
+        </div>
+        <button id="showTips" class="btn btn-ghost">SHOW TIPS</button>
+      </div>
+    </div>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
