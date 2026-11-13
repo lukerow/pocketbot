@@ -1,4 +1,4 @@
-// Pocket — tempo engine.
+// PocketBot — tempo engine.
 //
 // TempoTracker: given recent hit times and the drummer's TARGET tempo, works
 // out the tempo actually being played.
@@ -199,6 +199,7 @@ export class TempoFollower {
     this.feelState = null;
     this._feelCand = null;
     this._feelCount = 0;
+    this._jump = null;
   }
 
   hit(t, level = 1) {
@@ -237,8 +238,21 @@ export class TempoFollower {
     if (silence <= holdAfter) {
       const est = this.tracker.estimate(target, now, this.bpm);
       if (est) {
-        if (this.bpm == null || Math.abs(est.bpm - this.bpm) > target * 0.15) this.bpm = est.bpm;
-        else this.bpm += 0.35 * (est.bpm - this.bpm);
+        if (this.bpm == null) {
+          this.bpm = est.bpm;
+        } else if (Math.abs(est.bpm - this.bpm) > target * 0.15) {
+          // a big jump only counts if the next reading agrees, so one odd
+          // reading (a wild fill, a dropped stick) can never blow the number out
+          if (this._jump != null && Math.abs(est.bpm - this._jump) < target * 0.03) {
+            this.bpm = est.bpm;
+            this._jump = null;
+          } else {
+            this._jump = est.bpm;
+          }
+        } else {
+          this.bpm += 0.35 * (est.bpm - this.bpm);
+          this._jump = null;
+        }
       }
     }
 

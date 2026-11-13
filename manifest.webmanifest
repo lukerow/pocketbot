@@ -1,6 +1,6 @@
 {
-  "name": "Pocket — live tempo for drummers",
-  "short_name": "Pocket",
+  "name": "PocketBot — live tempo for drummers",
+  "short_name": "PocketBot",
   "description": "Set a target tempo, play, and see live if you're rushing or dragging.",
   "start_url": "./",
   "scope": "./",
@@ -11,6 +11,6 @@
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

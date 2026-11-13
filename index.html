@@ -9,9 +9,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="Pocket">
+  <meta name="apple-mobile-web-app-title" content="PocketBot">
   <meta name="description" content="Live tempo for drummers. Set a target, play, see if you're rushing or dragging.">
-  <title>Pocket</title>
+  <title>PocketBot</title>
   <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
@@ -22,13 +22,17 @@
   <main id="app" class="state-idle">
     <!-- top bar -->
     <header class="topbar">
-      <button id="settingsBtn" class="icon-btn" aria-label="Settings">
-        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="17" r="2" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-      </button>
-      <div class="brand">POCKET</div>
+      <div class="top-left">
+        <!-- mic status (not a button): lights up on every hit it hears; bars show input level -->
+        <div id="micBtn" class="mic" role="img" aria-label="Microphone input: lights up on every hit it hears">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <span class="mic-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+        </div>
+      </div>
+      <div class="brand">POCKETBOT</div>
       <div class="top-right">
-        <button id="chairBtn" class="icon-btn chair-btn" aria-label="Chair mode" aria-pressed="false">
-          <svg viewBox="0 0 12 16" width="18" height="24" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M1 0h1v9H1zM10 0h1v9h-1zM1 1h10v3H1zM0 8h12v2H0zM0 10h2v6H0zM10 10h2v6h-2zM3 10h1v3H3zM8 10h1v3H8z"/></svg>
+        <button id="settingsBtn" class="icon-btn" aria-label="Settings">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="17" r="2" fill="none" stroke="currentColor" stroke-width="2"/></svg>
         </button>
         <button id="stopBtn" class="stop-btn">STOP</button>
       </div>
@@ -36,11 +40,15 @@
 
     <!-- target: swipe, tap in time, or −/＋ -->
     <section id="targetBlock" class="target swipeable">
-      <div class="label">TARGET<button id="lockBadge" class="lock-badge" aria-label="Target locked: tap to unlock">🔒 LOCKED</button></div>
+      <div class="label"><span id="targetLabel">TARGET</span></div>
       <div class="target-row">
         <button id="minusBtn" class="step-btn" aria-label="Target down 1 BPM">−</button>
         <span id="targetBpm" class="target-bpm">120</span>
         <button id="plusBtn" class="step-btn" aria-label="Target up 1 BPM">＋</button>
+      </div>
+      <div class="target-sub">
+        <button id="tsBtn" class="ts-pill" aria-label="Time signature: tap to change"><span id="tsText">4/4</span><svg viewBox="0 0 10 6" width="9" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        <button id="beatDots" class="beat-dots" aria-label="Beat number in the bar. Tap on your beat 1 to move it."></button>
       </div>
     </section>
 
@@ -64,7 +72,6 @@
       <div class="live">
         <div class="live-wrap">
           <div id="liveBpm" class="live-bpm">---</div>
-          <div id="pulse" class="pulse" aria-hidden="true"></div>
         </div>
         <div class="live-label">BPM<span id="feel" class="feel" hidden></span></div>
         <div id="status" class="status" role="status" aria-live="polite">LISTENING</div>
@@ -81,16 +88,30 @@
     <footer class="controls">
       <div class="favs-row">
         <div id="favs" class="favs" aria-label="Favourite tempos"></div>
-        <button id="addFav" class="chip chip-add" aria-label="Save target as a favourite">＋</button>
+        <button id="addFav" class="chip chip-add" aria-label="Save tempo and time signature as a favourite">＋</button>
+      </div>
+      <!-- quick toggles: filled = on -->
+      <div class="toggles">
+        <button id="lockBtn" class="toggle" aria-pressed="false" aria-label="Target lock">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" fill="currentColor"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>LOCK
+        </button>
+        <button id="flashBtn" class="toggle" aria-pressed="true" aria-label="Beat flash">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z" fill="currentColor"/></svg>FLASH
+        </button>
+        <button id="chairBtn" class="toggle toggle-chair" aria-pressed="false" aria-label="Chair mode">
+          <svg viewBox="0 0 12 16" width="12" height="16" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M1 0h1v9H1zM10 0h1v9h-1zM1 1h10v3H1zM0 8h12v2H0zM0 10h2v6H0zM10 10h2v6h-2zM3 10h1v3H3zM8 10h1v3H8z"/></svg>CHAIR
+        </button>
       </div>
     </footer>
 
+    <div id="beatFlash" class="beat-flash" aria-hidden="true"></div>
     <div id="toast" class="toast" role="alert"></div>
 
     <!-- start -->
     <div id="startScreen" class="overlay start">
       <div class="start-inner">
-        <div class="start-brand">POCKET</div>
+        <img class="start-icon" src="icons/icon-192.png" alt="">
+        <div class="start-brand">POCKETBOT</div>
         <p class="start-sub">live tempo for drummers</p>
         <button id="startBtn" class="btn btn-start">START</button>
         <p id="startErr" class="start-err" hidden></p>
@@ -109,88 +130,121 @@
           <li><b>Swipe up / down</b> to set tempo</li>
           <li><b>Tap the number</b> to tap tempo</li>
           <li><b>− / ＋</b> for one BPM</li>
+          <li><b>4/4</b> to pick the time signature</li>
+          <li><b>Beat numbers</b> count the bar. Tap them on your 1 to move it</li>
+          <li><b>Mic</b> (top left) lights up on every hit</li>
         </ul>
         <button id="tipsDone" class="btn btn-start">GOT IT</button>
       </div>
     </div>
 
-    <!-- session summary (after STOP) -->
+    <!-- time signature picker (also in Settings) -->
+    <div id="tsPicker" class="overlay sheet" hidden>
+      <div class="sheet-inner">
+        <div class="sheet-head"><span>TIME SIGNATURE</span><button id="tsDone" class="done-btn">DONE</button></div>
+        <div class="seg ts-grid" data-setting="meter">
+          <button data-value="2/4">2/4</button>
+          <button data-value="3/4">3/4</button>
+          <button data-value="4/4">4/4</button>
+          <button data-value="5/4">5/4</button>
+          <button data-value="6/8">6/8</button>
+          <button data-value="7/8">7/8</button>
+        </div>
+        <p class="group-note">The beat numbers count this bar, and the count-in is one bar. 6/8 and 7/8 count eighth notes.</p>
+      </div>
+    </div>
+
+    <!-- session summary (after STOP): tempo graph + tips for next time -->
     <div id="summary" class="overlay sheet" hidden>
       <div class="sheet-inner">
-        <div class="sheet-head"><span>SESSION</span></div>
-        <div class="sum-grid">
-          <div><div class="sum-num" id="sumAvg">—</div><div class="sum-lbl">AVG BPM</div></div>
-          <div><div class="sum-num" id="sumDev">—</div><div class="sum-lbl">VS TARGET</div></div>
-          <div><div class="sum-num" id="sumTime">—</div><div class="sum-lbl">PLAYED</div></div>
-        </div>
-        <div class="sum-bar" aria-hidden="true">
-          <div id="sumBarDrag" class="seg-drag"></div>
-          <div id="sumBarLock" class="seg-lock"></div>
-          <div id="sumBarRush" class="seg-rush"></div>
-        </div>
-        <div class="sum-legend">
-          <span class="c-drag">DRAGGING <b id="sumDrag">0%</b></span>
+        <div class="sheet-head"><span>SESSION</span><span id="sumTime" class="sum-time"></span></div>
+        <div id="sumGraph" class="sum-graph" aria-label="Tempo over the session against your target"></div>
+        <div class="sum-key">
+          <span class="c-drag">DRAG <b id="sumDrag">0%</b></span>
           <span class="c-lock">LOCKED IN <b id="sumLock">0%</b></span>
-          <span class="c-rush">RUSHING <b id="sumRush">0%</b></span>
+          <span class="c-rush">RUSH <b id="sumRush">0%</b></span>
         </div>
-        <div id="sumChairs" class="sum-grid sum-chairs" hidden>
-          <div><div class="sum-num" id="sumTaken">0</div><div class="sum-lbl">CHAIRS TAKEN</div></div>
-          <div><div class="sum-num" id="sumDodged">0</div><div class="sum-lbl">DODGED</div></div>
-          <div><div class="sum-num" id="sumStreak">0:00</div><div class="sum-lbl">BEST STREAK</div></div>
-        </div>
-        <p id="sumVerdict" class="sum-verdict"></p>
+        <div class="sum-stats"><span>AVG <b id="sumAvg">—</b></span><span>VS TARGET <b id="sumDev">—</b></span></div>
+        <div id="sumChairs" class="sum-stats" hidden><span>CHAIRS <b id="sumTaken">0</b></span><span>DODGED <b id="sumDodged">0</b></span><span>BEST STREAK <b id="sumStreak">0:00</b></span></div>
+        <div class="group-title">NEXT TIME</div>
+        <ul id="sumTips" class="sum-tips"></ul>
         <button id="sumDone" class="btn btn-start">DONE</button>
       </div>
     </div>
 
-    <!-- settings -->
+    <!-- settings: grouped list, one line per setting -->
     <div id="settings" class="overlay sheet" hidden>
       <div class="sheet-inner">
         <div class="sheet-head">
           <span>SETTINGS</span>
-          <button id="closeSettings" class="icon-btn" aria-label="Close settings">✕</button>
+          <button id="closeSettings" class="done-btn">DONE</button>
         </div>
-        <div class="setting">
-          <div class="setting-label">CHAIR MODE</div>
-          <div class="seg" data-setting="chair">
-            <button data-value="false">OFF</button>
-            <button data-value="true">ON</button>
+
+        <div class="group-title">BEAT FLASH</div>
+        <div class="group">
+          <div class="row"><span>Beat flash</span><button class="switch" data-setting="flash" role="switch" aria-label="Beat flash"></button></div>
+          <div class="row row-stack"><span>Style</span>
+            <div class="seg" data-setting="flashStyle">
+              <button data-value="full">FULL</button>
+              <button data-value="edge">EDGE</button>
+              <button data-value="swing">SWING</button>
+              <button data-value="onoff">ON/OFF</button>
+            </div>
           </div>
-          <div class="seg seg-sub" data-setting="difficulty">
-            <button data-value="gentle">GENTLE</button>
-            <button data-value="strict">STRICT</button>
-            <button data-value="relentless">RELENTLESS</button>
-          </div>
-          <p class="setting-note">Drift way off and a chair comes flying. Lock back in to dodge it.</p>
-        </div>
-        <div class="setting">
-          <div class="setting-label">TARGET LOCK</div>
-          <div class="seg" data-setting="locked">
-            <button data-value="false">OFF</button>
-            <button data-value="true">ON</button>
-          </div>
-          <p class="setting-note">Stops stray swipes changing the target.</p>
-        </div>
-        <div class="setting">
-          <div class="setting-label">MIC SENSITIVITY</div>
-          <div class="seg" data-setting="sensitivity">
-            <button data-value="low">LOW<small>loud kit</small></button>
-            <button data-value="medium">MED</button>
-            <button data-value="high">HIGH<small>practice pad</small></button>
-          </div>
-          <div class="level"><div id="levelBar" class="level-bar"></div></div>
-          <p class="setting-note">The bar should jump on every hit.</p>
-        </div>
-        <div class="setting">
-          <div class="setting-label">LOCKED-IN ZONE</div>
-          <div class="seg" data-setting="tolerance">
-            <button data-value="1">±1</button>
-            <button data-value="2">±2</button>
-            <button data-value="3">±3</button>
-            <button data-value="5">±5</button>
+          <div class="row row-stack"><span>Time signature</span>
+            <div class="seg" data-setting="meter">
+              <button data-value="2/4">2/4</button>
+              <button data-value="3/4">3/4</button>
+              <button data-value="4/4">4/4</button>
+              <button data-value="5/4">5/4</button>
+              <button data-value="6/8">6/8</button>
+              <button data-value="7/8">7/8</button>
+            </div>
           </div>
         </div>
-        <button id="showTips" class="btn btn-ghost">SHOW TIPS</button>
+        <p class="group-note">One bar of count-in. 6/8 and 7/8 count eighth notes.</p>
+
+        <div class="group-title">TEMPO</div>
+        <div class="group">
+          <div class="row"><span>Target lock</span><button class="switch" data-setting="locked" role="switch" aria-label="Target lock"></button></div>
+          <div class="row"><span>Locked-in zone</span>
+            <div class="seg seg-fit" data-setting="tolerance">
+              <button data-value="1">±1</button>
+              <button data-value="2">±2</button>
+              <button data-value="3">±3</button>
+              <button data-value="5">±5</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="group-title">MIC</div>
+        <div class="group">
+          <div class="row row-level"><span>Sensitivity</span>
+            <div class="seg seg-fit" data-setting="sensitivity">
+              <button data-value="low">LOW</button>
+              <button data-value="medium">MED</button>
+              <button data-value="high">HIGH</button>
+            </div>
+            <div class="level" aria-hidden="true"><div id="levelBar" class="level-bar"></div></div>
+          </div>
+        </div>
+        <p class="group-note">LOW for a loud kit, HIGH for a practice pad. The green line should jump on every hit.</p>
+
+        <div class="group-title">CHAIR MODE</div>
+        <div class="group">
+          <div class="row"><span>Chair mode</span><button class="switch" data-setting="chair" role="switch" aria-label="Chair mode"></button></div>
+          <div class="row row-stack"><span>Difficulty</span>
+            <div class="seg" data-setting="difficulty">
+              <button data-value="gentle">GENTLE</button>
+              <button data-value="strict">STRICT</button>
+              <button data-value="relentless">RELENTLESS</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="group group-gap">
+          <button id="showTips" class="row row-link">Show tips</button>
+        </div>
       </div>
     </div>
   </main>

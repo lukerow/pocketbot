@@ -1,4 +1,4 @@
-// Pocket — hit detector. Runs on the audio thread, sample-accurate.
+// PocketBot — hit detector. Runs on the audio thread, sample-accurate.
 // Listens to the mic, finds sharp energy spikes (drum hits) and posts
 // their exact time (in AudioContext seconds) to the main thread.
 

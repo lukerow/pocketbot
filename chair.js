@@ -1,4 +1,4 @@
-// Pocket — CHAIR MODE.
+// PocketBot — CHAIR MODE.
 //
 // Drift majorly out of the pocket and a folding chair comes flying.
 //   • HEAT builds only while you're MAJORLY off (a % of the target, set by difficulty);

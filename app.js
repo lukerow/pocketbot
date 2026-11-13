@@ -22,9 +22,14 @@ const state = {
   target: clampBpm(store.get('target', 120)),
   tolerance: store.get('tolerance', 2),
   sensitivity: store.get('sensitivity', 'medium'),
-  favs: store.get('favs', [90, 100, 120, 140]),
+  // favourites hold a tempo and a time signature (older saves were plain numbers)
+  favs: store.get('favs', [90, 100, 120, 140]).map((f) => (typeof f === 'number' ? { bpm: f, meter: '4/4' } : f)),
   swiped: store.get('swiped', false),
   chair: store.get('chair', false),
+  flash: store.get('flash', true),
+  flashStyle: store.get('flashStyle', 'full'), // full | edge | swing | onoff
+  meter: store.get('meter', '4/4'),            // time signature: sets beat-1 accent + count-in length
+  countIn: null,
   difficulty: store.get('difficulty', 'strict'),
   usedChair: false,
   locked: false,
@@ -38,8 +43,10 @@ const $ = (id) => document.getElementById(id);
 const app = $('app');
 const el = {
   target: $('targetBpm'), live: $('liveBpm'), status: $('status'), tip: $('tip'), feel: $('feel'),
-  marker: $('marker'), zone: $('zone'), dev: $('devText'), pulse: $('pulse'),
-  favs: $('favs'), addFav: $('addFav'), stop: $('stopBtn'), lockBadge: $('lockBadge'),
+  marker: $('marker'), zone: $('zone'), dev: $('devText'), mic: $('micBtn'), beatFlash: $('beatFlash'),
+  favs: $('favs'), addFav: $('addFav'), stop: $('stopBtn'),
+  lockBtn: $('lockBtn'), flashBtn: $('flashBtn'), targetLabel: $('targetLabel'),
+  tsBtn: $('tsBtn'), tsText: $('tsText'), tsPicker: $('tsPicker'), beatDots: $('beatDots'),
   plus: $('plusBtn'), minus: $('minusBtn'),
   targetBlock: $('targetBlock'), liveBlock: $('liveBlock'),
   overlay: $('swipeOverlay'), overlayBpm: $('overlayBpm'), toast: $('toast'),
@@ -88,7 +95,7 @@ async function startListening() {
   if (isDemo) { startDemo(); return onStarted(); }
 
   if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-    return showStartError('The microphone needs a secure (https) connection. Open Pocket from its https link.');
+    return showStartError('The microphone needs a secure (https) connection. Open PocketBot from its https link.');
   }
   try {
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -148,9 +155,12 @@ function onStarted() {
   chair.reset();
   state.usedChair = state.chair;
   lastHeard = Date.now();
+  flash.restart(performance.now() / 1000 + 0.6);
+  beatLoop();
   requestWakeLock();
   loop();
   if (!store.get('tipsSeen', false)) showTips();
+  store.set('sessions', store.get('sessions', 0) + 1);
 }
 
 // ---------- first-run tips ----------
@@ -164,6 +174,7 @@ function stop() {
   stopAudio();
   releaseWakeLock();
   render();
+  renderDots();
   if (summary) showSummary(summary);
 }
 
@@ -209,10 +220,96 @@ function onHit(t, level) {
   if (!state.running) return;
   lastHeard = Date.now();
   follower.hit(t, level);
-  el.pulse.classList.add('on');
-  requestAnimationFrame(() => requestAnimationFrame(() => el.pulse.classList.remove('on')));
+  // the mic button lights up on every hit it hears
+  el.mic.classList.add('hit');
+  clearTimeout(onHit.t);
+  onHit.t = setTimeout(() => el.mic.classList.remove('hit'), 90);
+  // gently pull the beat flash into line with the drummer's accents
+  const tp = demo ? t : performance.now() / 1000 - Math.max(0, audio.ctx.currentTime - t);
+  flash.nudge(tp, level);
   update();
 }
+
+// ---------- beat flash: visual count-in + guide ----------
+// Screen edges blink on the target beat. 4 full-brightness blinks to count in;
+// then dimmer while you're locked in, full brightness the further you drift.
+const flash = {
+  origin: 0, last: -1, counting: false, lockedFor: 0, accentMax: 0, nudged: null,
+  barOffset: 0, // which beat counts as "1" (moved by tapping the beat dots)
+  restart(at) { this.origin = at; this.last = -1; this.counting = true; this.barOffset = 0; },
+  nudge(tp, level) {
+    this.accentMax = Math.max(level, this.accentMax * 0.98);
+    if (this.counting || state.reading.mode !== 'live' || level < this.accentMax * 0.6) return;
+    const P = 60 / state.target;
+    let e = ((tp - this.origin) % P + P) % P;
+    if (e > P / 2) e -= P;
+    const beat = Math.round((tp - this.origin) / P);
+    if (beat === this.nudged) return;          // at most one nudge per beat
+    this.nudged = beat;
+    if (Math.abs(e) < P * 0.25) this.origin += e * 0.08;
+  },
+};
+function beatLoop() {
+  clearTimeout(beatLoop.t);
+  if (!state.running) { state.countIn = null; return; }
+  const P = 60 / state.target;
+  const now = performance.now() / 1000;
+  const n = Math.floor((now - flash.origin) / P + 0.002);
+  if (n >= 0 && n !== flash.last) { flash.last = n; onBeat(n, P); }
+  // sleep until the next beat (re-checked often enough to follow tempo changes)
+  const next = flash.origin + (Math.max(n, -1) + 1) * P;
+  beatLoop.t = setTimeout(beatLoop, Math.max(4, Math.min(100, (next - now) * 1000)));
+}
+const beatsPerBar = () => parseInt(state.meter, 10) || 4;
+// count in one bar (two bars of 2/4)
+const countLen = () => { const b = beatsPerBar(); return b < 3 ? b * 2 : b; };
+function onBeat(n, P) {
+  const counting = flash.counting && n < countLen();
+  if (flash.counting && !counting) flash.counting = false;
+  state.countIn = counting ? n : null;
+  render();
+  const r = state.reading;
+  const bpb = beatsPerBar();
+  const bar = (((n - flash.barOffset) % bpb) + bpb) % bpb;
+  renderDots(bar);
+  // every beat flashes the same (the beat numbers show where 1 is); slightly softer while locked in
+  if (!state.flash) return;
+  const i = !counting && r.mode === 'live' && state.status === 'locked' ? 0.85 : 1;
+  const style = state.flashStyle;
+  if (style === 'onoff' && bar % 2) return; // on for a beat, off for a beat
+  const f = el.beatFlash;
+  f.className = 'beat-flash ' + style + (style === 'swing' ? (bar % 2 ? ' r' : ' l') : '');
+  // a hard blink: straight on, hold, straight off (no fade)
+  const dur = style === 'onoff' ? P * 970 : Math.min(130, Math.max(80, P * 220));
+  f.getAnimations().forEach((a) => a.cancel());
+  f.animate([{ opacity: i }, { opacity: i, offset: 0.99 }, { opacity: 0 }], { duration: dur, easing: 'linear' });
+}
+
+// ---------- beat dots: where you are in the bar; tap them on your "1" to move beat 1 ----------
+function renderDots(bar = -1) {
+  const bpb = beatsPerBar();
+  if (el.beatDots.children.length !== bpb) {
+    el.beatDots.innerHTML = '';
+    for (let k = 0; k < bpb; k++) { const d = document.createElement('i'); d.textContent = k + 1; el.beatDots.appendChild(d); }
+  }
+  [...el.beatDots.children].forEach((d, k) => d.classList.toggle('on', k === bar));
+}
+el.beatDots.addEventListener('click', () => {
+  if (!state.running) return toast('Press START first');
+  const P = 60 / state.target;
+  const n = Math.round((performance.now() / 1000 - flash.origin) / P);
+  flash.barOffset = ((n % beatsPerBar()) + beatsPerBar()) % beatsPerBar();
+  renderDots(0);
+  toast('Beat 1 moved');
+});
+
+// ---------- time signature: the pill on the main screen opens a picker ----------
+el.tsBtn.addEventListener('click', () => { renderSettings(); el.tsPicker.hidden = false; });
+$('tsDone').addEventListener('click', () => { el.tsPicker.hidden = true; });
+el.tsPicker.addEventListener('click', (e) => {
+  if (e.target === el.tsPicker) el.tsPicker.hidden = true;
+  if (e.target.closest('.seg button')) setTimeout(() => { el.tsPicker.hidden = true; }, 180);
+});
 
 function update() {
   const t = now();
@@ -222,6 +319,7 @@ function update() {
   updateStatus();
   session.add(dt);
   const r = state.reading;
+  flash.lockedFor = r.mode === 'live' && state.status === 'locked' ? flash.lockedFor + dt : 0;
   chair.update(dt, {
     running: state.running, mode: r.mode, status: state.status,
     dev: r.bpm == null ? 0 : r.bpm - state.target, tol: state.tolerance, target: state.target,
@@ -257,11 +355,20 @@ function loop() {
 
 // ---------- session stats (for the summary on STOP) ----------
 const session = {
-  reset() { this.t = 0; this.sumBpm = 0; this.sumDev = 0; this.locked = 0; this.rush = 0; this.drag = 0; },
+  reset() { this.t = 0; this.sumBpm = 0; this.sumDev = 0; this.locked = 0; this.rush = 0; this.drag = 0; this.samples = []; this.lastSample = -1; },
   add(dt) {
     const r = state.reading;
-    if (!state.running || r.mode !== 'live' || r.bpm == null || !dt) return;
+    if (!state.running || r.mode !== 'live' || r.bpm == null || !dt) {
+      // a break: leave a gap in the graph
+      if (state.running && this.samples.length && this.samples[this.samples.length - 1]) this.samples.push(null);
+      return;
+    }
     this.t += dt;
+    // tempo graph: one point every 0.25 s of playing (bpm, target, status)
+    if (this.t - this.lastSample >= 0.25) {
+      this.lastSample = this.t;
+      this.samples.push({ t: this.t, bpm: r.bpm, target: state.target, s: state.status });
+    }
     this.sumBpm += r.bpm * dt;
     this.sumDev += (r.bpm - state.target) * dt;
     if (state.status === 'locked') this.locked += dt;
@@ -277,38 +384,114 @@ const session = {
       locked: this.locked / this.t,
       rush: this.rush / this.t,
       drag: this.drag / this.t,
+      samples: this.samples,
     };
   },
 };
 session.reset();
 
+const fmtTime = (sec) => Math.floor(sec / 60) + ':' + String(Math.floor(sec % 60)).padStart(2, '0');
+const signed = (x) => { const v = Math.round(x * 10) / 10; return v === 0 ? '±0' : (v > 0 ? '+' : '−') + Math.abs(v); };
+
 function showSummary(s) {
   const pct = (x) => Math.round(x * 100) + '%';
-  const devR = Math.round(s.dev * 10) / 10;
+  $('sumTime').textContent = fmtTime(s.seconds) + ' PLAYED';
   $('sumAvg').textContent = Math.round(s.avg);
-  $('sumDev').textContent = devR === 0 ? '±0' : (devR > 0 ? '+' : '−') + Math.abs(devR);
-  const m = Math.floor(s.seconds / 60);
-  $('sumTime').textContent = m + ':' + String(Math.round(s.seconds % 60)).padStart(2, '0');
+  $('sumDev').textContent = signed(s.dev);
   $('sumLock').textContent = pct(s.locked);
   $('sumRush').textContent = pct(s.rush);
   $('sumDrag').textContent = pct(s.drag);
-  $('sumBarDrag').style.width = pct(s.drag);
-  $('sumBarLock').style.width = pct(s.locked);
-  $('sumBarRush').style.width = pct(s.rush);
-  let verdict;
-  if (s.locked >= 0.75) verdict = 'Solid. In the pocket most of the time.';
-  else if (s.rush > s.drag + 0.1 && s.rush > 0.15) verdict = 'You tended to rush. Try sitting back on the beat.';
-  else if (s.drag > s.rush + 0.1 && s.drag > 0.15) verdict = 'You tended to drag. Try pushing the time forward.';
-  else verdict = 'Some drift both ways. Keep an eye on the slider.';
-  $('sumVerdict').textContent = verdict;
   const cs = chair.stats();
   $('sumChairs').hidden = !state.usedChair;
   $('sumTaken').textContent = cs.taken;
   $('sumDodged').textContent = cs.dodged;
-  const bs = Math.floor(cs.bestStreak);
-  $('sumStreak').textContent = Math.floor(bs / 60) + ':' + String(bs % 60).padStart(2, '0');
+  $('sumStreak').textContent = fmtTime(cs.bestStreak);
+  $('sumTips').innerHTML = '';
+  for (const tip of coachTips(s)) {
+    const li = document.createElement('li');
+    li.textContent = tip;
+    $('sumTips').appendChild(li);
+  }
   el.summary.hidden = false;
+  drawGraph(s.samples); // after showing, so the graph can measure its width
 }
+
+// ---------- tempo graph: your BPM over the session vs the target and locked-in zone ----------
+function drawGraph(samples) {
+  const box = $('sumGraph');
+  const W = Math.max(240, box.clientWidth), H = 170, L = 34, R = 6, T = 8, B = 20;
+  const pts = samples.filter(Boolean);
+  if (!pts.length) { box.innerHTML = ''; return; }
+  const tEnd = pts[pts.length - 1].t;
+  const tol = state.tolerance;
+  // vertical scale: deviation from target, at least ±3× the zone
+  let range = tol * 3;
+  for (const p of pts) range = Math.max(range, Math.abs(p.bpm - p.target) * 1.1);
+  range = Math.ceil(Math.min(range, 40));
+  const x = (t) => L + (t / Math.max(tEnd, 1)) * (W - L - R);
+  const y = (d) => T + (1 - (d + range) / (2 * range)) * (H - T - B);
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+  const add = (tag, attrs, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    svg.appendChild(n);
+    return n;
+  };
+  add('rect', { x: L, y: y(tol), width: W - L - R, height: y(-tol) - y(tol), class: 'g-zone' });
+  add('line', { x1: L, x2: W - R, y1: y(0), y2: y(0), class: 'g-target' });
+  add('text', { x: L - 6, y: y(range) + 9, class: 'g-lbl', 'text-anchor': 'end' }, '+' + range);
+  add('text', { x: L - 6, y: y(0) + 4, class: 'g-lbl g-lbl-t', 'text-anchor': 'end' }, Math.round(pts[0].target));
+  add('text', { x: L - 6, y: y(-range) - 2, class: 'g-lbl', 'text-anchor': 'end' }, '−' + range);
+  add('text', { x: L + 4, y: y(range) + 9, class: 'g-lbl' }, 'RUSH');
+  add('text', { x: L + 4, y: y(-range) - 2, class: 'g-lbl' }, 'DRAG');
+  for (const f of [0, 0.5, 1]) {
+    add('text', { x: x(tEnd * f), y: H - 4, class: 'g-lbl', 'text-anchor': f === 0 ? 'start' : f === 1 ? 'end' : 'middle' }, fmtTime(tEnd * f));
+  }
+  // the line, coloured by locked / rushing / dragging, with gaps for breaks
+  const cls = { locked: 'g-lock', rush: 'g-rush', drag: 'g-drag' };
+  let run = [], runCls = null, prev = null;
+  const flush = () => { if (run.length > 1) add('polyline', { points: run.join(' '), class: 'g-line ' + runCls }); run = []; };
+  for (const p of samples) {
+    if (!p) { flush(); prev = null; continue; }
+    const c = cls[p.s] || 'g-lock';
+    const xy = x(p.t).toFixed(1) + ',' + y(Math.max(-range, Math.min(range, p.bpm - p.target))).toFixed(1);
+    if (c !== runCls) { flush(); if (prev) run.push(prev); runCls = c; }
+    run.push(xy);
+    prev = xy;
+  }
+  flush();
+  box.innerHTML = '';
+  box.appendChild(svg);
+}
+
+// ---------- coaching: what to work on next time ----------
+function coachTips(s) {
+  const tips = [];
+  const pts = s.samples.filter(Boolean);
+  const tol = state.tolerance;
+  const dev = (a) => a.reduce((m, p) => m + (p.bpm - p.target), 0) / Math.max(1, a.length);
+  const third = Math.floor(pts.length / 3);
+  const trend = third >= 4 ? dev(pts.slice(-third)) - dev(pts.slice(0, third)) : 0;
+  const mean = dev(pts);
+  const wobble = Math.sqrt(pts.reduce((m, p) => m + (p.bpm - p.target - mean) ** 2, 0) / Math.max(1, pts.length));
+
+  if (s.locked >= 0.75) tips.push('Solid: in the pocket ' + Math.round(s.locked * 100) + '% of the time. Try a tighter locked-in zone or a faster tempo.');
+  else if (s.rush > s.drag + 0.1 && s.rush > 0.15) tips.push('You tended to rush. Sit back on the beat and let the backbeat (2 and 4) land a hair later.');
+  else if (s.drag > s.rush + 0.1 && s.drag > 0.15) tips.push('You tended to drag. Push the time forward: think of the hi-hat driving the groove.');
+  else tips.push('Some drift both ways. Keep the meter in the corner of your eye and correct small, early.');
+
+  if (trend > tol) tips.push('You sped up as you went (' + signed(trend) + ' BPM by the end). Keep the first bars in your head, and use the beat flash as a check.');
+  else if (trend < -tol) tips.push('You slowed down as you went (' + signed(trend) + ' BPM by the end). Practise in shorter sections and keep your energy up to the last bar.');
+  if (wobble > tol * 2 && tips.length < 3) tips.push('Tempo wobbled a lot. Slow the target down 10 BPM and play a simple groove until it stays green.');
+  if (s.seconds < 60 && tips.length < 3) tips.push('Short session. Play at least 2–3 minutes for a clearer graph.');
+  return tips;
+}
+
 $('sumDone').addEventListener('click', () => { el.summary.hidden = true; });
 
 // ---------- render ----------
@@ -319,6 +502,8 @@ function render() {
   app.className = 'state-' + s + (state.locked ? ' locked' : '') + (state.swiped ? ' swiped' : '') + (state.chair ? ' chair-on' : '');
   el.target.textContent = state.target;
   el.overlayBpm.textContent = state.target;
+  el.tsText.textContent = state.meter;
+  if (!tapTempo.t) el.targetLabel.textContent = store.get('sessions', 0) <= 5 && !state.locked ? 'TARGET · TAP IN TIME' : 'TARGET';
 
   const range = Math.max(4, state.target * 0.08); // meter full scale: ±8% of target
   el.zone.style.width = Math.min(100, (state.tolerance / range) * 100) + '%';
@@ -329,16 +514,20 @@ function render() {
   if (feel) el.feel.textContent = feel;
 
   if (!state.running || r.bpm == null || s === 'listen') {
-    el.live.textContent = '---';
+    const counting = state.running && state.countIn != null;
+    // count-in: the big number counts the bar so you can read it from the kit
+    el.live.textContent = counting ? String(state.countIn % beatsPerBar() + 1) : '---';
+    el.live.classList.toggle('count', counting);
     el.status.classList.remove('blink');
-    el.status.textContent = 'LISTENING';
-    el.tip.textContent = state.running ? 'start playing' : '';
+    el.status.textContent = counting ? 'COUNT-IN' : 'LISTENING';
+    el.tip.textContent = !state.running ? '' : counting ? state.meter : 'start playing';
     el.marker.style.left = '50%';
     el.dev.textContent = '±0';
     return;
   }
 
   const dev = r.bpm - state.target;
+  el.live.classList.remove('count');
   el.live.textContent = Math.round(r.bpm);
   const devR = Math.round(dev);
   el.dev.textContent = devR === 0 ? '±0' : (devR > 0 ? '+' : '−') + Math.abs(devR);
@@ -357,11 +546,14 @@ function render() {
 
 function lockedToast() { toast('Target locked'); }
 
-function setTarget(bpm, { bump = true } = {}) {
+function setTarget(bpm, { bump = true, recount = true } = {}) {
   const b = clampBpm(bpm);
   if (b === state.target) return;
   state.target = b;
   store.set('target', b);
+  // new tempo → a fresh count-in once you stop changing it
+  clearTimeout(setTarget.recount);
+  if (recount && state.running) setTarget.recount = setTimeout(() => flash.restart(performance.now() / 1000 + 0.3), 600);
   if (bump) {
     el.target.classList.add('bump');
     clearTimeout(setTarget.t);
@@ -451,27 +643,34 @@ function tapTempo(t) {
   if (taps.length > 6) taps.shift();
   el.target.classList.add('tapped');
   setTimeout(() => el.target.classList.remove('tapped'), 90);
+  // one dot per tap, so you can see each one land
+  el.targetLabel.textContent = 'TAP ' + Array(taps.length).fill('●').join(' ');
+  clearTimeout(tapTempo.t);
+  tapTempo.t = setTimeout(() => { tapTempo.t = 0; render(); }, 2000);
   if (taps.length >= 2) {
     const avg = (taps[taps.length - 1] - taps[0]) / (taps.length - 1);
-    setTarget(60 / avg, { bump: false });
+    setTarget(60 / avg, { bump: false, recount: false });
+    // the count-in carries on in time with your taps
+    if (state.running) flash.restart(t + avg);
   }
 }
 
-// ---------- favourites ----------
+// ---------- favourites: tempo + time signature, one tap sets both ----------
+const sameFav = (f) => f.bpm === state.target && f.meter === state.meter;
 function renderFavs() {
   el.favs.innerHTML = '';
   if (!state.favs.length) {
     const s = document.createElement('span');
     s.className = 'favs-empty';
-    s.textContent = 'save tempos with ＋';
+    s.textContent = '＋ saves tempo + time sig';
     el.favs.appendChild(s);
     return;
   }
-  for (const bpm of state.favs) {
+  for (const fav of state.favs) {
     const b = document.createElement('button');
-    b.className = 'chip' + (bpm === state.target ? ' active' : '');
-    b.textContent = bpm;
-    b.setAttribute('aria-label', `Set target to ${bpm} BPM (hold to remove)`);
+    b.className = 'chip' + (sameFav(fav) ? ' active' : '');
+    b.innerHTML = `<b>${fav.bpm}</b><small>${fav.meter}</small>`;
+    b.setAttribute('aria-label', `${fav.bpm} BPM in ${fav.meter} (hold to remove)`);
     let holdTimer = 0;
     let held = false;
     b.addEventListener('pointerdown', () => {
@@ -481,10 +680,10 @@ function renderFavs() {
         b.classList.add('removing');
         if (navigator.vibrate) navigator.vibrate(20);
         setTimeout(() => {
-          state.favs = state.favs.filter((x) => x !== bpm);
+          state.favs = state.favs.filter((x) => x !== fav);
           store.set('favs', state.favs);
           renderFavs();
-          toast(`Removed ${bpm}`);
+          toast(`Removed ${fav.bpm} ${fav.meter}`);
         }, 280);
       }, 600);
     });
@@ -496,7 +695,9 @@ function renderFavs() {
     b.addEventListener('click', () => {
       if (held) return;
       if (state.locked) return lockedToast();
-      setTarget(bpm);
+      if (fav.meter !== state.meter) applySetting('meter', fav.meter);
+      setTarget(fav.bpm);
+      renderFavs();
     });
     el.favs.appendChild(b);
   }
@@ -504,23 +705,32 @@ function renderFavs() {
 }
 
 el.addFav.addEventListener('click', () => {
-  if (state.favs.includes(state.target)) return toast(`${state.target} is already saved`);
+  const label = `${state.target} ${state.meter}`;
+  if (state.favs.some(sameFav)) return toast(`${label} is already saved`);
   if (state.favs.length >= 12) return toast('Max 12. Hold one to remove it');
-  state.favs = [...state.favs, state.target].sort((a, b) => a - b);
+  state.favs = [...state.favs, { bpm: state.target, meter: state.meter }]
+    .sort((a, b) => a.bpm - b.bpm || a.meter.localeCompare(b.meter));
   store.set('favs', state.favs);
   renderFavs();
-  if (!store.get('favHint', false)) { store.set('favHint', true); toast(`Saved ${state.target}. Hold to remove`); }
-  else toast(`Saved ${state.target}`);
+  if (!store.get('favHint', false)) { store.set('favHint', true); toast(`Saved ${label}. Hold to remove`); }
+  else toast(`Saved ${label}`);
 });
 
-// ---------- lock (set in Settings; the 🔒 LOCKED badge unlocks with one tap) ----------
+// ---------- quick toggles (main screen + Settings, always in sync) ----------
 function setLocked(on) {
   state.locked = on;
   toast(on ? 'Target locked' : 'Target unlocked');
   renderSettings();
   render();
 }
-el.lockBadge.addEventListener('click', () => setLocked(false));
+function setFlash(on) {
+  state.flash = on;
+  store.set('flash', on);
+  toast(on ? 'Beat flash on' : 'Beat flash off');
+  renderSettings();
+}
+el.lockBtn.addEventListener('click', () => setLocked(!state.locked));
+el.flashBtn.addEventListener('click', () => setFlash(!state.flash));
 
 // ---------- settings ----------
 function renderSettings() {
@@ -529,33 +739,51 @@ function renderSettings() {
     seg.querySelectorAll('button').forEach((b) => {
       b.classList.toggle('on', String(state[key]) === b.dataset.value);
       if (key === 'difficulty') b.disabled = !state.chair;
+      if (key === 'flashStyle') b.disabled = !state.flash;
     });
   });
+  document.querySelectorAll('.switch').forEach((sw) => sw.setAttribute('aria-checked', String(!!state[sw.dataset.setting])));
+  el.lockBtn.setAttribute('aria-pressed', String(state.locked));
+  el.flashBtn.setAttribute('aria-pressed', String(state.flash));
+  el.chairBtn.setAttribute('aria-pressed', String(state.chair));
+}
+function applySetting(key, value) {
+  if (key === 'chair') return setChair(value);
+  if (key === 'locked') return setLocked(value);
+  if (key === 'flash') return setFlash(value);
+  state[key] = value;
+  store.set(key, value);
+  if (key === 'difficulty') chair.setDifficulty(value);
+  if (key === 'sensitivity' && audio) audio.node.port.postMessage({ sensitivity: value });
+  if (key === 'meter') {
+    if (state.running) flash.restart(performance.now() / 1000 + 0.4); // count in the new bar
+    renderDots();
+    renderFavs();
+  }
+  renderSettings();
+  if (state.running) updateStatus();
+  render();
 }
 document.querySelectorAll('.seg').forEach((seg) => {
   seg.addEventListener('click', (e) => {
     const b = e.target.closest('button');
-    if (!b) return;
+    if (!b || b.disabled) return;
     const key = seg.dataset.setting;
-    if (key === 'chair') return setChair(b.dataset.value === 'true');
-    if (key === 'locked') return setLocked(b.dataset.value === 'true');
-    const value = key === 'tolerance' ? Number(b.dataset.value) : b.dataset.value;
-    state[key] = value;
-    if (key === 'difficulty') chair.setDifficulty(value);
-    store.set(key, value);
-    if (key === 'sensitivity' && audio) audio.node.port.postMessage({ sensitivity: value });
-    renderSettings();
-    if (state.running) updateStatus();
-    render();
+    applySetting(key, key === 'tolerance' ? Number(b.dataset.value) : b.dataset.value);
   });
+});
+document.querySelectorAll('.switch').forEach((sw) => {
+  sw.addEventListener('click', () => applySetting(sw.dataset.setting, !state[sw.dataset.setting]));
 });
 el.settingsBtn.addEventListener('click', () => { renderSettings(); el.settings.hidden = false; });
 el.closeSettings.addEventListener('click', () => { el.settings.hidden = true; });
 el.settings.addEventListener('click', (e) => { if (e.target === el.settings) el.settings.hidden = true; });
 
 function onLevel(peak) {
-  if (el.settings.hidden) return;
   const db = 20 * Math.log10(Math.max(peak, 1e-5));
+  const bars = el.mic.querySelectorAll('.mic-bars i');
+  bars.forEach((b, k) => b.classList.toggle('on', db > [-48, -32, -18][k]));
+  if (el.settings.hidden) return;
   el.level.style.width = Math.max(0, Math.min(100, ((db + 60) / 60) * 100)) + '%';
 }
 
@@ -588,11 +816,27 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+// ---------- no zooming: fast taps (tap tempo, −/＋) must never zoom the page ----------
+// iPhone ignores "user-scalable=no", so swallow the second tap of a double tap and
+// still deliver it as a click to whatever button it landed on.
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+  const t = e.timeStamp;
+  if (t - lastTouchEnd < 400) {
+    e.preventDefault();
+    const b = e.target.closest?.('button');
+    if (b && !b.disabled) b.click();
+  }
+  lastTouchEnd = t;
+}, { passive: false });
+for (const ev of ['gesturestart', 'gesturechange', 'dblclick']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+
 // ---------- wire up ----------
 el.start.addEventListener('click', startListening);
 el.stop.addEventListener('click', stop);
 setChair(state.chair, { announce: false });
 renderFavs();
+renderDots();
 render();
 if (isDemo) {
   document.querySelector('.start-sub').textContent = 'demo mode: simulated drummer';
