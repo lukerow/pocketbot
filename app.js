@@ -27,7 +27,7 @@ const state = {
   swiped: store.get('swiped', false),
   chair: store.get('chair', false),
   flash: store.get('flash', true),
-  flashStyle: store.get('flashStyle', 'full'), // full | edge | swing | onoff
+  flashStyle: store.get('flashStyle', 'edge'), // edge | full | swing | onoff
   meter: store.get('meter', '4/4'),            // time signature: sets beat-1 accent + count-in length
   countIn: null,
   difficulty: store.get('difficulty', 'strict'),

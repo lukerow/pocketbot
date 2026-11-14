@@ -1,5 +1,5 @@
 // PocketBot — offline support. Serves from cache, refreshes in the background.
-const CACHE = 'pocketbot-v17';
+const CACHE = 'pocketbot-v18';
 const SHELL = [
   './', 'index.html', 'style.css', 'app.js', 'tempo.js', 'chair.js', 'worklet.js',
   'manifest.webmanifest', 'fonts/jetbrains-mono.woff2', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png',
